@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="padding_default">40sp</dimen>
+    <dimen name="margin_default">10sp</dimen>
+    <dimen name="textSize_default">20sp</dimen>
+</resources>
