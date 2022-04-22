@@ -4,6 +4,7 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import android.annotation.SuppressLint;
+import android.bluetooth.BluetoothAdapter;
 import android.content.DialogInterface;
 import android.os.Bundle;
 import android.text.Editable;
@@ -14,6 +15,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.SeekBar;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -66,6 +68,13 @@ public class MainActivity extends BaseActivity implements View.OnClickListener{
         widget_init();
         //初始化数据设置
         data_init();
+        //判断蓝牙状态
+        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+        if(adapter == null){
+            _normal_exception("设备不支持蓝牙");
+            TextView connect_status = findViewById(R.id.ble_status);
+            connect_status.setText("设备不支持");
+        }
     }
 
     @Override
@@ -84,20 +93,30 @@ public class MainActivity extends BaseActivity implements View.OnClickListener{
                 break;
             }
             default:{
-                _exception_popwin("不存在的Button");
+                _fatal_error_popwin("不存在的Button");
             }
         }
     }
 
-    private void _exception_popwin(String errorInfo){
+    private AlertDialog.Builder _exception_alert(String errorInfo){
         AlertDialog.Builder dialog = new AlertDialog.Builder(MainActivity.this);
         dialog.setTitle("错误");
-        dialog.setMessage("发生了异常:"+errorInfo+"，程序即将退出");
+        dialog.setMessage("发生了异常:"+errorInfo);
         dialog.setCancelable(false);
-        dialog.setPositiveButton("确认",(DialogInterface dialogInter, int which)->{
+
+        return dialog;
+    }
+    private void _fatal_error_popwin(String errorInfo){
+        AlertDialog.Builder dialog = _exception_alert(errorInfo);
+
+        dialog.setPositiveButton("退出",(DialogInterface dialogInter, int which)->{
             ActivityManagement.finishAll();
         });
-
+        dialog.show();
+    }
+    private void _normal_exception(String errorInfo){
+        AlertDialog.Builder dialog = _exception_alert(errorInfo);
+        dialog.setPositiveButton("确定",(dialogInter, which)->{ });
         dialog.show();
     }
 
@@ -131,7 +150,7 @@ public class MainActivity extends BaseActivity implements View.OnClickListener{
                 break;
             }
             default:{
-                _exception_popwin("不存在的SeekBar");
+                _fatal_error_popwin("不存在的SeekBar");
             }
         }
 
