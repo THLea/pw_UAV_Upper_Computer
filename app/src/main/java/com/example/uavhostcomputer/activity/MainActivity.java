@@ -1,11 +1,18 @@
-package com.example.uavhostcomputer;
+package com.example.uavhostcomputer.activity;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
-import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
-import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
 import android.content.DialogInterface;
+import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -17,33 +24,45 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.example.uavhostcomputer.R;
+import com.example.uavhostcomputer.tool_class.ActivityManagement;
+import com.example.uavhostcomputer.tool_class.BlueToothTool;
+
 import java.util.HashMap;
 import java.util.Map;
 
-public class MainActivity extends BaseActivity implements View.OnClickListener{
+public class MainActivity extends BaseActivity implements View.OnClickListener {
 
     private static final String TAG = "MainActivity";
+    private static final int REQUEST_PERMISSION_BT = 0x01;
+    private static final int REQUEST_PERMISSION_LOCATION = 0x02;
+    private static final int REQUEST_GET_DEVICE = 0x03;
     private static int PARAM_STEP_MAX = 100;
-    private enum ParamType_e{
+
+    private enum ParamType_e {
         KP,
         KI,
         KD
-    };
+    }
     private static final String PARAM_INIT = "50.000";
     private final Map<ParamType_e, String> param_map = new HashMap<>(3);
-    private TextWatcher edit_text_watcher = new TextWatcher() {
+    private final TextWatcher edit_text_watcher = new TextWatcher() {
         @Override
-        public void beforeTextChanged(CharSequence charSequence, int i, int i1, int i2) { }
+        public void beforeTextChanged(CharSequence charSequence, int i, int i1, int i2) {
+        }
+
         @Override
         public void onTextChanged(CharSequence charSequence, int start, int before, int count) {
             _update_param(R.id.p_param_bar);
             _update_param(R.id.i_param_bar);
             _update_param(R.id.d_param_bar);
         }
+
         @Override
-        public void afterTextChanged(Editable editable) { }
+        public void afterTextChanged(Editable editable) {
+        }
     };
-    private SeekBar.OnSeekBarChangeListener sbListener = new SeekBar.OnSeekBarChangeListener() {
+    private final SeekBar.OnSeekBarChangeListener sbListener = new SeekBar.OnSeekBarChangeListener() {
         @SuppressLint({"DefaultLocale", "NonConstantResourceId"})
         @Override
         public void onProgressChanged(SeekBar seekBar, int i, boolean b) {
@@ -56,8 +75,10 @@ public class MainActivity extends BaseActivity implements View.OnClickListener{
         }
 
         @Override
-        public void onStopTrackingTouch(SeekBar seekBar) { }
+        public void onStopTrackingTouch(SeekBar seekBar) {
+        }
     };
+    private BluetoothDevice selected_device = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -68,20 +89,29 @@ public class MainActivity extends BaseActivity implements View.OnClickListener{
         widget_init();
         //初始化数据设置
         data_init();
-        //判断蓝牙状态
-        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-        if(adapter == null){
+        //蓝牙服务初始化
+        if (!BlueToothTool.blueToothInit((BluetoothManager) getSystemService(BLUETOOTH_SERVICE))) {
             _normal_exception("设备不支持蓝牙");
             TextView connect_status = findViewById(R.id.ble_status);
             connect_status.setText("设备不支持");
         }
+        //权限判断与申请
+        checkPermission();
     }
 
+    @SuppressLint({"InlinedApi", "MissingPermission"})
     @Override
     public void onClick(View view) {
-        switch (view.getId()){
-            case R.id.choose_ble:{
+        switch (view.getId()) {
+            case R.id.choose_ble: {
                 Log.i(TAG, "onClick: choose ble net");
+                //判断蓝牙是否开启
+                if(BlueToothTool.getBlueToothAdapter().isEnabled()){
+                    goto_choose_ble();
+                } else {
+                    BlueToothTool.getBlueToothAdapter().enable();
+                }
+                Log.i(TAG, "onClick: " + BlueToothTool.getBlueToothInfo());
                 break;
             }
             case R.id.connect_ble:{
@@ -94,6 +124,32 @@ public class MainActivity extends BaseActivity implements View.OnClickListener{
             }
             default:{
                 _fatal_error_popwin("不存在的Button");
+            }
+        }
+    }
+
+    private void goto_choose_ble(){
+        Intent intent = new Intent(MainActivity.this, FindDeviceActivity.class);
+        startActivity(intent);
+        startActivityForResult(intent, REQUEST_GET_DEVICE);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        Log.i(TAG, "onRequestPermissionsResult: " + grantResults.length + " " + grantResults[0] + " " + permissions[0]);
+        switch (requestCode){
+            case REQUEST_PERMISSION_BT:{
+
+                break;
+            }
+            case REQUEST_PERMISSION_LOCATION:{
+                if(grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED){
+                    Toast.makeText(MainActivity.this, "已开启定位权限", Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(MainActivity.this, "权限开启失败，蓝牙功能可能无法正常使用", Toast.LENGTH_SHORT).show();
+                }
+                break;
             }
         }
     }
@@ -119,7 +175,6 @@ public class MainActivity extends BaseActivity implements View.OnClickListener{
         dialog.setPositiveButton("确定",(dialogInter, which)->{ });
         dialog.show();
     }
-
     private void _update_param(int seekBar_id){
         double param_min = 0, param_max = 0;  //最小值，最大值
         Double param = 0.;  //当前值
@@ -167,7 +222,6 @@ public class MainActivity extends BaseActivity implements View.OnClickListener{
         param_text.setText(param_str);
         param_map.put(param_key, param_str);
     }
-
     private void widget_init(){
         //设置SeekBar的监听
         {
@@ -205,7 +259,6 @@ public class MainActivity extends BaseActivity implements View.OnClickListener{
             connectBle.setOnClickListener(this);
         }
     }
-
     private void data_init(){
         PARAM_STEP_MAX = getResources().getInteger(R.integer.param_step_max);
 
@@ -213,5 +266,30 @@ public class MainActivity extends BaseActivity implements View.OnClickListener{
         param_map.put(ParamType_e.KP, PARAM_INIT);
         param_map.put(ParamType_e.KI, PARAM_INIT);
         param_map.put(ParamType_e.KD, PARAM_INIT);
+    }
+
+    private void checkPermission(){
+        if(ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED){
+            ActivityCompat.requestPermissions(MainActivity.this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, REQUEST_PERMISSION_LOCATION);
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        switch (requestCode) {
+            case REQUEST_GET_DEVICE:{
+                if(resultCode == RESULT_OK && data != null){
+                    BluetoothDevice device = data.getParcelableExtra("device");
+                    if (device != null && device.getName() != null) {
+                        selected_device = device;
+                        TextView bt_name = findViewById(R.id.ble_name);
+                        bt_name.setText(device.getName());
+                    }
+                }
+                break;
+            }
+        }
     }
 }
