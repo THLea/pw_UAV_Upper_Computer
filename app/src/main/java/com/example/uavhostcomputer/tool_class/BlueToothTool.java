@@ -3,6 +3,7 @@ package com.example.uavhostcomputer.tool_class;
 import android.annotation.SuppressLint;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothManager;
 
 import com.example.uavhostcomputer.adapter.Ble_adapter;
@@ -12,6 +13,7 @@ import java.util.List;
 public class BlueToothTool {
     private static BluetoothAdapter m_adapter;
     private static BluetoothManager m_manager;
+    private static BluetoothGatt m_gatt;
     private static Ble_adapter m_ble_adapter;
     private static List<BluetoothDevice> m_devices;
     private static List<Integer> m_rssi;
@@ -20,6 +22,7 @@ public class BlueToothTool {
     public static boolean blueToothInit(BluetoothManager manager){
         m_manager = manager;
         m_adapter = manager.getAdapter();
+        m_gatt = null;
 
         return m_adapter != null;
     }
@@ -76,5 +79,13 @@ public class BlueToothTool {
 
     public static void setRssi(List<Integer> m_rssi) {
         BlueToothTool.m_rssi = m_rssi;
+    }
+
+    public static BluetoothGatt getGatt() {
+        return m_gatt;
+    }
+
+    public static void setGatt(BluetoothGatt m_gatt) {
+        BlueToothTool.m_gatt = m_gatt;
     }
 }

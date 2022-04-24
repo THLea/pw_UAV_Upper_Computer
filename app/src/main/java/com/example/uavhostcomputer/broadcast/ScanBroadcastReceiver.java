@@ -59,6 +59,7 @@ public class ScanBroadcastReceiver extends BroadcastReceiver {
                             rssi = extras.getShort(BluetoothDevice.EXTRA_RSSI);
                         }
                         Log.d(TAG, "rssi="+rssi+" name="+device.getName()+" address="+device.getAddress()+" lv="+lv);
+                        //更新扫描到的设备列表
                         BlueToothTool.getDevices().add(device);
                         BlueToothTool.getRssi().add(rssi);
                         BlueToothTool.getBle_adapter().notifyDataSetChanged();
