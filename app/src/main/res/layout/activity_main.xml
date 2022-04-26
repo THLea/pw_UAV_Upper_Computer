@@ -76,7 +76,7 @@
             android:layout_weight="1"
             android:paddingTop="20sp"
             android:paddingBottom="20sp"
-            android:text="连 接 蓝 牙"
+            android:text="连 接 / 断 开"
             android:layout_gravity="end"
             android:textSize="@dimen/textSize_default"
             />

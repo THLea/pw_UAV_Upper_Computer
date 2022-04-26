@@ -16,6 +16,7 @@ import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
+import android.bluetooth.BluetoothSocket;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -38,6 +39,8 @@ import com.example.uavhostcomputer.R;
 import com.example.uavhostcomputer.tool_class.ActivityManagement;
 import com.example.uavhostcomputer.tool_class.BlueToothTool;
 
+import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -120,6 +123,7 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
     private UUID notify_UUID_chara;
     private UUID indicate_UUID_service;
     private UUID indicate_UUID_chara;
+    private final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805f9b34fb");
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -165,7 +169,9 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
                     Log.i(TAG, "onClick: connect ble net");
                     if (selected_device != null && BlueToothTool.getBlueToothAdapter() != null) {
                         if(is_connect){
-                            Toast.makeText(MainActivity.this, "已经连接了", Toast.LENGTH_SHORT).show();
+                            BlueToothTool.getGatt().disconnect();
+                            BlueToothTool.setGatt(null);
+                            is_connect = false;
                         } else {
                             ble_connect();
                         }
@@ -350,7 +356,9 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
         @Override
         public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
             super.onCharacteristicRead(gatt, characteristic, status);
-            Toast.makeText(MainActivity.this,"读取数据", Toast.LENGTH_SHORT).show();
+            Log.d(TAG, "onCharacteristicRead: ");
+            String data = characteristic.getValue().toString();
+            Log.d(TAG, "data = "+data);
         }
 
         //写设备时调用这个函数
@@ -369,13 +377,8 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
         @Override
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
             super.onCharacteristicChanged(gatt, characteristic);
-
-        }
-
-        //向设备Descriptor写入时调用这个
-        @Override
-        public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
-            super.onDescriptorWrite(gatt, descriptor, status);
+            Log.d(TAG, "onCharacteristicChanged: ");
+            receive_data();
         }
 
         //读取到rssi时调用这个
@@ -383,6 +386,14 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
         public void onReadRemoteRssi(BluetoothGatt gatt, int rssi, int status) {
             super.onReadRemoteRssi(gatt, rssi, status);
         }
+
+        @Override
+        public void onDescriptorRead(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
+            super.onDescriptorRead(gatt, descriptor, status);
+            Log.d(TAG, "onDescriptorRead: ");
+        }
+
+
     };
 
     @Override
