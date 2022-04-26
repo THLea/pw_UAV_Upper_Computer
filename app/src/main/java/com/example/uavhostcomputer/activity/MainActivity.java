@@ -234,7 +234,7 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
     private void send_data(){
         BluetoothGattService service = BlueToothTool.getGatt().getService(write_UUID_service);
         BluetoothGattCharacteristic characteristic = service.getCharacteristic(write_UUID_chara);
-        byte[] data = param_map.toString().getBytes();
+        byte[] data = ("KP="+param_map.get(ParamType_e.KP)+",KI="+param_map.get(ParamType_e.KI)+",KD="+param_map.get(ParamType_e.KD)).getBytes();
         if(data.length > 20){
             Log.d(TAG, "send_data: data_length = "+data.length);
             int num = 0;
