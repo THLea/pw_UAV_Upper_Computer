@@ -26,6 +26,8 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.Editable;
+import android.text.InputFilter;
+import android.text.Spanned;
 import android.text.TextWatcher;
 import android.util.Log;
 import android.view.View;
@@ -71,7 +73,7 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
         KD
     }
     //初始参数的值
-    private static final String PARAM_INIT = "50.000";
+    private static final String PARAM_INIT = "50.00";
     //参数的值
     private final Map<ParamType_e, String> param_map = new HashMap<>(3);
     private final TextWatcher edit_text_watcher = new TextWatcher() {
@@ -108,6 +110,32 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
         public void onStopTrackingTouch(SeekBar seekBar) {
         }
     };
+
+    private final InputFilter ipSectionFilter = (CharSequence source, int start, int end, Spanned dest, int dStart, int dEnd)->{
+        String sourceText = source.toString();
+        String destText = dest.toString();
+        if(dStart == 0 && "0".equals(source)){
+            return "0";
+        }
+
+        StringBuilder totalText = new StringBuilder();
+        totalText.append(destText.substring(0, dStart))
+                .append(sourceText)
+                .append(destText.substring(dStart, destText.length()));
+        try {
+            if(Double.parseDouble(totalText.toString()) >= 1000){
+                return "";
+            }
+        } catch (Exception e){
+            return "";
+        }
+
+        if("".equals(sourceText.toString())) {
+            return "";
+        }
+
+        return sourceText;
+    };
     private BluetoothDevice selected_device = null;
     private TextView device_name;
     private TextView connect_status;
@@ -123,7 +151,11 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
     private UUID notify_UUID_chara;
     private UUID indicate_UUID_service;
     private UUID indicate_UUID_chara;
-    private final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805f9b34fb");
+    private final UUID DEVICE_UUID_SERVICE = UUID.fromString("0000ffe0-0000-1000-8000-00805f9b34fb");
+    private final UUID DEVICE_UUID_CHARA = UUID.fromString("0000ffe1-0000-1000-8000-00805f9b34fb");
+    //数据帧，大小固定为20，帧格式为{(帧头)0xfffe[0:1] + (操作码)0xAA[2] + (KP)0x0ABCDE[3:5] + (KI)0x0ABCDE[6:8]
+    //                           + (KD)0x0ABCDE[9:11] + (高度)0xAA[12] + }
+    private byte[] data_frame = new byte[20];
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -291,8 +323,10 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
                     Log.d(TAG, "read_service:"+read_UUID_service+" read_characteristic:"+read_UUID_chara);
                 }
                 if((charaProp & BluetoothGattCharacteristic.PROPERTY_WRITE) > 0){
-                    write_UUID_service = service.getUuid();
-                    write_UUID_chara = chara.getUuid();
+//                    write_UUID_service = service.getUuid();
+//                    write_UUID_chara = chara.getUuid();
+                    write_UUID_service = DEVICE_UUID_SERVICE;
+                    write_UUID_chara = DEVICE_UUID_CHARA;
                     Log.d(TAG, "write_service:"+write_UUID_service+" write_characteristic:"+write_UUID_chara);
                 }
                 if((charaProp & BluetoothGattCharacteristic.PROPERTY_NOTIFY) > 0){
@@ -357,15 +391,28 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
         public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
             super.onCharacteristicRead(gatt, characteristic, status);
             Log.d(TAG, "onCharacteristicRead: ");
-            String data = characteristic.getValue().toString();
+            StringBuilder data = new StringBuilder();
+            for(byte i : characteristic.getValue()){
+                data.append((char) i);
+            }
             Log.d(TAG, "data = "+data);
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
         }
 
         //写设备时调用这个函数
         @Override
         public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
             super.onCharacteristicWrite(gatt, characteristic, status);
-            Log.d(TAG, "onCharacteristicWrite: status = "+status+" value="+ Arrays.toString(characteristic.getValue()));
+            StringBuilder dat = new StringBuilder();
+            for(byte i : characteristic.getValue()){
+                dat.append((char) i);
+            }
+            Log.d(TAG, "onCharacteristicWrite: status = "+status+" value: "+ dat);
+            Log.d(TAG, "onCharacteristicWrite: characteristic uuid = "+characteristic.getUuid());
             if(status == BluetoothGatt.GATT_SUCCESS){
                 sendBroadcast(new Intent(ACTION_GATT_SEND_SUCCESSFUL));
             } else {
@@ -415,6 +462,21 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
                 break;
             }
         }
+    }
+
+    private short crc16(byte[] data, int num, short crc){
+        for(int i = 0; i < num; i++){
+            crc = (short) (crc^(data[i] << 8));
+            for(int j = 0; j < 8; j++){
+                if((crc & 0x8000) == 1){
+                    crc = (short) ((crc << 1) ^ 0x1021);
+                } else {
+                    crc <<= 1;
+                }
+                crc &= 0xffff;
+            }
+        }
+        return crc;
     }
 
     private AlertDialog.Builder _exception_alert(String errorInfo){
@@ -480,7 +542,7 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
         param_min = Double.parseDouble(param_min_edit.getText().toString());
         param_max = Double.parseDouble(param_max_edit.getText().toString());
         param = (param_max - param_min) * ((double) seekBar.getProgress() / PARAM_STEP_MAX) + param_min;
-        param_str = String.format("%.3f", param);
+        param_str = String.format("%.2f", param);
 
         param_text.setText(param_str);
         param_map.put(param_key, param_str);
@@ -502,17 +564,23 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
             EditText max = findViewById(R.id.p_param_max);
             EditText min = findViewById(R.id.p_param_min);
             max.addTextChangedListener(edit_text_watcher);
+            max.setFilters(new InputFilter[]{ipSectionFilter});
             min.addTextChangedListener(edit_text_watcher);
+            min.setFilters(new InputFilter[]{ipSectionFilter});
 
             max = findViewById(R.id.i_param_max);
             min = findViewById(R.id.i_param_min);
             max.addTextChangedListener(edit_text_watcher);
+            max.setFilters(new InputFilter[]{ipSectionFilter});
             min.addTextChangedListener(edit_text_watcher);
+            min.setFilters(new InputFilter[]{ipSectionFilter});
 
             max = findViewById(R.id.d_param_max);
             min = findViewById(R.id.d_param_min);
             max.addTextChangedListener(edit_text_watcher);
+            max.setFilters(new InputFilter[]{ipSectionFilter});
             min.addTextChangedListener(edit_text_watcher);
+            min.setFilters(new InputFilter[]{ipSectionFilter});
         }
         //设置Button的监听
         {
