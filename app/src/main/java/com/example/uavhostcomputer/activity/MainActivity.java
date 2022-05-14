@@ -47,6 +47,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collector;
 
@@ -153,9 +154,12 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
     private UUID indicate_UUID_chara;
     private final UUID DEVICE_UUID_SERVICE = UUID.fromString("0000ffe0-0000-1000-8000-00805f9b34fb");
     private final UUID DEVICE_UUID_CHARA = UUID.fromString("0000ffe1-0000-1000-8000-00805f9b34fb");
-    //数据帧，大小固定为20，帧格式为{(帧头)0xfffe[0:1] + (操作码)0xAA[2] + (KP)0x0ABCDE[3:5] + (KI)0x0ABCDE[6:8]
-    //                           + (KD)0x0ABCDE[9:11] + (高度)0xAA[12] + }
-    private byte[] data_frame = new byte[20];
+    private final boolean DEBUG_SEL = false;  //调试开关，用来调试不同的蓝牙模块
+    //数据帧，大小固定为20字节，帧格式为{(帧头)0xfffe[0:1] + (操作码)0xAA[2] + (KP)0x0ABCDE[3:5] + (KI)0x0ABCDE[6:8]
+    //                           + (KD)0x0ABCDE[9:11] + (高度)0xAAAA[12:13] + (未定)[14:15] + (CRC16)0xAAAA[16:17] + (帧尾)0xefff[18:19]}
+    //操作码： 暂定为发送数据0x01, 启动0x02, 停止0x04, 仅操作不发送数据时数据帧的参数部分填0
+    //参数使用8421BCD码发送，高度使用16进制数据，校验码只校验2到15字节
+    //举例，如果发送参数为KP=12.36,KI=1.25,KD=0.77,Height=20, 发送数据为0xfffe 11 001236 000125 000077 0014 0000 d006 efff, 共20字节
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -213,7 +217,7 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
                 case R.id.ble_send: {
                     Log.i(TAG, "onClick: " + param_map.toString());
                     if(is_connect){
-                        send_data();
+                        send_data_frame((byte) 0x01);
                     } else {
                         Toast.makeText(MainActivity.this, "没有连接任何设备，无法发送", Toast.LENGTH_SHORT).show();
                     }
@@ -262,6 +266,80 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
         return true;
     }
 
+    private short crc16(byte[] data, int num, short crc){
+        final int PLOY = 0x1021;
+        for(int i = 0; i < num; i++){
+            crc = (short) (crc^(data[i] << 8));
+            for(int j = 0; j < 8; j++){
+                if((crc & 0x8000) != 0){
+                    crc = (short) ((crc << 1) ^ PLOY);
+                } else {
+                    crc <<= 1;
+                }
+                crc &= 0xffff;
+            }
+        }
+        return crc;
+    }
+
+    private byte[] prepare_data_frame(byte operaCode){
+        byte[] frame = new byte[20];
+        byte[] checkData = new byte[14];
+
+        final double KP = Double.parseDouble(Objects.requireNonNull(param_map.get(ParamType_e.KP)));
+        final double KI = Double.parseDouble(Objects.requireNonNull(param_map.get(ParamType_e.KI)));
+        final double KD = Double.parseDouble(Objects.requireNonNull(param_map.get(ParamType_e.KD)));
+        final short HEIGHT = 20;
+
+        if(operaCode == 0x01) {
+            checkData[1] = (byte) (KP / 100 % 10);
+            checkData[2] = (byte) ((((byte) (KP / 10 % 10)) << 4) | ((byte) (KP % 10)));
+            checkData[3] = (byte) ((((byte) (KP * 10 % 10)) << 4) | ((byte) (KP * 100 % 10)));
+            checkData[4] = (byte) (KI / 100 % 10);
+            checkData[5] = (byte) ((((byte) (KI / 10 % 10)) << 4) | ((byte) (KI % 10)));
+            checkData[6] = (byte) ((((byte) (KI * 10 % 10)) << 4) | ((byte) (KI * 100 % 10)));
+            checkData[7] = (byte) (KD / 100 % 10);
+            checkData[8] = (byte) ((((byte) (KD / 10 % 10)) << 4) | ((byte) (KD % 10)));
+            checkData[9] = (byte) ((((byte) (KD * 10 % 10)) << 4) | ((byte) (KD * 100 % 10)));
+            checkData[10] = (byte) (HEIGHT >>> 8);
+            checkData[11] = (byte) (HEIGHT & 0xff);
+            checkData[12] = checkData[13] = 0;
+        } else {
+            Arrays.fill(checkData, (byte) 0);
+        }
+        checkData[0] = operaCode;
+
+        short crc = crc16(checkData, 14, (short) 0xffff);
+
+        frame[0] = (byte) 0xff;
+        frame[1] = (byte) 0xfe;
+        System.arraycopy(checkData, 0, frame, 2, 14);
+        frame[16] = (byte) (crc>>>8);
+        frame[17] = (byte) (crc & 0xff);
+        frame[18] = (byte) 0xef;
+        frame[19] = (byte) 0xff;
+
+        Log.i(TAG, "prepare_data_frame: check data = " + Arrays.toString(checkData));
+        Log.i(TAG, "prepare_data_frame: crc = " + crc);
+        Log.i(TAG, "prepare_data_frame: frame = " + Arrays.toString(frame));
+
+        return frame;
+    }
+
+    @SuppressLint("MissingPermission")
+    private void send_data_frame(byte operaCode){
+        byte[] frame = prepare_data_frame(operaCode);
+        BluetoothGattService service = BlueToothTool.getGatt().getService(write_UUID_service);
+        BluetoothGattCharacteristic characteristic = service.getCharacteristic(write_UUID_chara);
+        characteristic.setValue(frame);
+        BlueToothTool.getGatt().writeCharacteristic(characteristic);
+        try {
+            Thread.sleep(10);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+
     @SuppressLint("MissingPermission")
     private void send_data(){
         BluetoothGattService service = BlueToothTool.getGatt().getService(write_UUID_service);
@@ -298,13 +376,6 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
         }
     }
 
-    @SuppressLint("MissingPermission")
-    private void receive_data(){
-        BluetoothGattCharacteristic characteristic = BlueToothTool.getGatt().
-                getService(read_UUID_service).getCharacteristic(read_UUID_chara);
-        BlueToothTool.getGatt().readCharacteristic(characteristic);
-    }
-
     public List<BluetoothGattService> getSupportedGattServices(){
         if(BlueToothTool.getGatt() == null)
             return null;
@@ -323,10 +394,13 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
                     Log.d(TAG, "read_service:"+read_UUID_service+" read_characteristic:"+read_UUID_chara);
                 }
                 if((charaProp & BluetoothGattCharacteristic.PROPERTY_WRITE) > 0){
-//                    write_UUID_service = service.getUuid();
-//                    write_UUID_chara = chara.getUuid();
-                    write_UUID_service = DEVICE_UUID_SERVICE;
-                    write_UUID_chara = DEVICE_UUID_CHARA;
+                    if(DEBUG_SEL) {
+                        write_UUID_service = service.getUuid();
+                        write_UUID_chara = chara.getUuid();
+                    } else {
+                        write_UUID_service = DEVICE_UUID_SERVICE;
+                        write_UUID_chara = DEVICE_UUID_CHARA;
+                    }
                     Log.d(TAG, "write_service:"+write_UUID_service+" write_characteristic:"+write_UUID_chara);
                 }
                 if((charaProp & BluetoothGattCharacteristic.PROPERTY_NOTIFY) > 0){
@@ -380,22 +454,27 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
                 //初始化服务和特征值
                 initServiceAndChara();
                 //订阅通知
-                BlueToothTool.getGatt().setCharacteristicNotification(
-                        BlueToothTool.getGatt().getService(notify_UUID_service).getCharacteristic(notify_UUID_chara), true);
+                boolean b = gatt.setCharacteristicNotification(
+                        gatt.getService(notify_UUID_service).getCharacteristic(notify_UUID_chara), true);
+                if(b){
+                    List<BluetoothGattDescriptor> descriptors = gatt.getService(notify_UUID_service).getCharacteristic(notify_UUID_chara).getDescriptors();
+                    for(BluetoothGattDescriptor descriptor : descriptors){
+                        descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                        gatt.writeDescriptor(descriptor);
+                    }
+                }
             }
-
         }
 
         //读取设备时调用这个函数
         @Override
         public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
             super.onCharacteristicRead(gatt, characteristic, status);
+            BluetoothGattDescriptor descriptor = characteristic.getDescriptor(characteristic.getUuid());
             Log.d(TAG, "onCharacteristicRead: ");
-            StringBuilder data = new StringBuilder();
-            for(byte i : characteristic.getValue()){
-                data.append((char) i);
-            }
-            Log.d(TAG, "data = "+data);
+            byte[] data = characteristic.getValue();
+
+            Log.i(TAG, "data = "+ Arrays.toString(data));
             try {
                 Thread.sleep(10);
             } catch (InterruptedException e) {
@@ -407,12 +486,7 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
         @Override
         public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
             super.onCharacteristicWrite(gatt, characteristic, status);
-            StringBuilder dat = new StringBuilder();
-            for(byte i : characteristic.getValue()){
-                dat.append((char) i);
-            }
-            Log.d(TAG, "onCharacteristicWrite: status = "+status+" value: "+ dat);
-            Log.d(TAG, "onCharacteristicWrite: characteristic uuid = "+characteristic.getUuid());
+            Log.d(TAG, "onCharacteristicWrite: status = "+status+" value: "+ Arrays.toString(characteristic.getValue()));
             if(status == BluetoothGatt.GATT_SUCCESS){
                 sendBroadcast(new Intent(ACTION_GATT_SEND_SUCCESSFUL));
             } else {
@@ -424,8 +498,8 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
         @Override
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
             super.onCharacteristicChanged(gatt, characteristic);
-            Log.d(TAG, "onCharacteristicChanged: ");
-            receive_data();
+            Log.d(TAG, "onCharacteristicChanged: value = "+ Arrays.toString(characteristic.getValue()));
+            gatt.readCharacteristic(characteristic);
         }
 
         //读取到rssi时调用这个
@@ -462,21 +536,6 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
                 break;
             }
         }
-    }
-
-    private short crc16(byte[] data, int num, short crc){
-        for(int i = 0; i < num; i++){
-            crc = (short) (crc^(data[i] << 8));
-            for(int j = 0; j < 8; j++){
-                if((crc & 0x8000) == 1){
-                    crc = (short) ((crc << 1) ^ 0x1021);
-                } else {
-                    crc <<= 1;
-                }
-                crc &= 0xffff;
-            }
-        }
-        return crc;
     }
 
     private AlertDialog.Builder _exception_alert(String errorInfo){
